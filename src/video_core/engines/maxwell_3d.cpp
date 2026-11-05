@@ -254,7 +254,9 @@ void Maxwell3D::ProcessMacro(Core::System& system, u32 method, const u32* base_s
 }
 
 void Maxwell3D::RefreshParametersImpl() {
-    if (!Settings::IsGPULevelHigh()) {
+    // EDEN_NX2_NO_MACRO_REFRESH=1: keep the parameters as submitted (as on low accuracy).
+    static const bool no_refresh = std::getenv("EDEN_NX2_NO_MACRO_REFRESH") != nullptr;
+    if (!Settings::IsGPULevelHigh() || no_refresh) {
         return;
     }
     size_t current_index = 0;
