@@ -2796,10 +2796,17 @@ private:
         const auto input_size = input.data.size();
         {
             std::scoped_lock lk{m_mutex};
-            if (m_skipping) {
+            // A client that keeps feeding a skipped movie (a looping title background) paces
+            // itself by its frames: about 2 s of input after the skip resumes normal decoding.
+            if (m_skipping && ++m_skipped_inputs < 240) {
                 const u64 id = ++m_submitted;
                 TipcReplyWords(ctx, {static_cast<u32>(id), static_cast<u32>(id >> 32)});
                 return;
+            }
+            if (m_skipping) {
+                m_skipping = false;
+                m_end_queued = false;
+                LOG_INFO(Service, "{} skipped movie still fed, playing it", GetServiceName());
             }
             m_inputs.Push(std::move(input));
             m_stream_ended = false;
@@ -2969,7 +2976,7 @@ private:
                 }
                 system.Host1x().GetSyncpointManager().IncrementGuest(m_syncpoint);
                 m_last_output = m_outputs.back();
-                if (frame.end && m_inputs.Empty() && m_decoded.empty() && (m_skipping ||
+                if (frame.end && m_inputs.Empty() && m_decoded.empty() &&
                     system.GetApplicationProcessProgramID() == Settings::MarioKartWorldProgramId)) {
                     DrainFreeAsEndOfStream();
                 }
@@ -3033,6 +3040,7 @@ private:
             }();
             if (skip_movies && !m_decoded.empty()) {
                 m_skipping = true;
+                m_skipped_inputs = 0;
                 m_end_queued = true;
                 m_inputs.Clear();
                 m_ready->room.store(false, std::memory_order_relaxed);
@@ -3236,6 +3244,7 @@ private:
     bool m_stream_ended{};             ///< End-of-stream frame handed out, nothing submitted since
     bool m_end_queued{};
     bool m_skipping{};                 ///< EDEN_NX2_SKIP_MOVIES ended this movie early
+    u32 m_skipped_inputs{};
     bool m_flush{};
     bool m_quit{};
     std::thread m_worker;
