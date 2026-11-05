@@ -78,14 +78,14 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
     case 0x233: operand(16); operand(24); operand(32); break;
     case 0xa20: case 0x621: case 0x808: case 0x923: operand(16); operand(24); break;
     case 0x209: operand(16); operand(24); operand(32); break;
-    case 0xa23: case 0x623: operand(16); operand(24); operand(64); break;
+    case 0xa23: case 0x623: case 0x423: operand(16); operand(24); operand(64); break;
     case 0x321: operand(16, input.Bits(74, 2) + 1); operand(24); operand(32); break;
     case 0x322: operand(24); operand(32, input.Bits(74, 2) + 1); break;
     case 0x927: operand(24); operand(32); break;
     case 0x202: case 0x243: operand(16); operand(32); break;
     case 0x812: case 0x824: case 0x831: case 0x424: case 0x624:
         operand(16); operand(24); operand(64); break;
-    case 0x230: case 0x231: case 0x211: case 0x224:
+    case 0x230: case 0x231: case 0x211: case 0x212: case 0x224:
         operand(16); operand(24); operand(32); operand(64); break;
     case 0x819: case 0xa11:
         operand(16); operand(24); operand(64); break;
@@ -658,6 +658,20 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             xmad(251, a, b, 251, false, true, 0, immediate);
             emit(base(0x5c18000000000000ULL) | (u64{251} << 8) |
                 (u64{250} << 20) | (u64{16} << 39));
+        };
+        const auto right_shift_u64_low = [&](u32 target, u32 low, u32 high, u32 shift) {
+            mov_imm(250, 32);
+            emit(0x5c10000000000000ULL | predicate | 251 | (u64{250} << 8) |
+                 (u64{shift} << 20) | (u64{1} << 48));
+            emit(0x5c28000000000000ULL | predicate | 250 | (u64{low} << 8) | (u64{shift} << 20));
+            emit(0x5c48000000000000ULL | predicate | 251 | (u64{high} << 8) | (u64{251} << 20));
+            emit(0x5c40000000000000ULL | predicate | 250 | (u64{250} << 8) |
+                 (u64{251} << 20) | (u64{1} << 41) | (u64{7} << 48));
+            emit(0x1c00000000000000ULL | predicate | 251 | (u64{shift} << 8) |
+                 (u64{0xffffffe0U} << 20));
+            emit(0x5c28000000000000ULL | predicate | 251 | (u64{high} << 8) | (u64{251} << 20));
+            emit(0x5c40000000000000ULL | predicate | target | (u64{250} << 8) |
+                 (u64{251} << 20) | (u64{1} << 41) | (u64{7} << 48));
         };
         const auto right_shift_u64_low = [&](u32 target, u32 low, u32 high, u32 shift) {
             mov_imm(250, 32);
