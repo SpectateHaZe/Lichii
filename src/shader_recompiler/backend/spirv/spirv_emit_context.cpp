@@ -8,6 +8,7 @@
 #include <array>
 #include <bit>
 #include <climits>
+#include <optional>
 
 #include <boost/container/static_vector.hpp>
 
@@ -983,7 +984,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const IR::Program& program) {
             const Id ssbo_offset{OpUConvert(U32[1], OpISub(U64, addr, ssbo_addr))};
             const Id ssbo_index{OpShiftRightLogical(U32[1], ssbo_offset, Const(shift))};
             const Id ssbo_pointer{OpAccessChain(element_pointer, ssbo_id, zero, ssbo_index)};
-            callback(ssbo_pointer);
+            callback(ssbo_pointer, ssbo_id, ssbo_index);
             AddLabel(else_label);
         }};
         if (info.native_global_bounds) {
@@ -1038,7 +1039,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const IR::Program& program) {
             return func_id;
         }
         define_body(ssbo_member, addr, element_pointer, shift,
-                    [&](Id ssbo_pointer) { OpReturnValue(OpLoad(type, ssbo_pointer)); });
+                    [&](Id ssbo_pointer, Id, Id) { OpReturnValue(OpLoad(type, ssbo_pointer)); });
         OpReturnValue(ConstantNull(type));
         OpFunctionEnd();
         return func_id;
