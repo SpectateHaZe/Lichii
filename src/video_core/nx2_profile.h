@@ -3,11 +3,17 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <map>
+#include <mutex>
 #include <string>
 #include <unordered_set>
+#include <vector>
+
+#include <fmt/ranges.h>
 
 #include "common/common_types.h"
 #include "video_core/gpu_split.h"
@@ -234,6 +240,57 @@ inline void Report(const char* thread_name = "GPU thread") {
     data = {};
     data.window_start = now;
     data.cpu_start_ns = cpu_now;
+}
+
+} // namespace VideoCommon::Nx2Profile
+
+#ifdef _WIN32
+extern "C" __declspec(dllimport) unsigned short __stdcall RtlCaptureStackBackTrace(
+    unsigned long, unsigned long, void**, unsigned long*);
+extern "C" char __ImageBase;
+#endif
+
+namespace VideoCommon::Nx2Profile {
+
+// Logs the call stacks (module offsets, symbolize with lichii.pdb) that download the most buffer
+// bytes, every 1000 downloads.
+inline void NoteDownloadStack(u64 bytes) {
+#ifdef _WIN32
+    if (!Enabled()) {
+        return;
+    }
+    struct Entry {
+        u64 count{};
+        u64 bytes{};
+    };
+    static std::mutex mutex;
+    static std::map<std::array<u64, 10>, Entry> stacks;
+    static u64 total{};
+    void* frames[10]{};
+    const auto depth = RtlCaptureStackBackTrace(1, 10, frames, nullptr);
+    const auto base = reinterpret_cast<u64>(&__ImageBase);
+    std::array<u64, 10> key{};
+    for (u32 i = 0; i < depth; ++i) {
+        key[i] = reinterpret_cast<u64>(frames[i]) - base;
+    }
+    std::scoped_lock lk{mutex};
+    auto& entry = stacks[key];
+    ++entry.count;
+    entry.bytes += bytes;
+    if (++total % 1000 != 0) {
+        return;
+    }
+    std::vector<std::pair<std::array<u64, 10>, Entry>> sorted(stacks.begin(), stacks.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second.bytes > b.second.bytes; });
+    for (size_t i = 0; i < std::min<size_t>(sorted.size(), 6); ++i) {
+        LOG_INFO(HW_GPU, "Download stack {} KiB in {}: {:x}", sorted[i].second.bytes >> 10,
+                 sorted[i].second.count, fmt::join(sorted[i].first, " "));
+    }
+    stacks.clear();
+#else
+    (void)bytes;
+#endif
 }
 
 } // namespace VideoCommon::Nx2Profile
