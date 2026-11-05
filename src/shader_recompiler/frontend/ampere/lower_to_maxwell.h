@@ -76,6 +76,15 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
     case 0x308: operand(16); operand(32); break;
     case 0x433: case 0x633: operand(16); operand(24); break;
     case 0x220: case 0x221: operand(16); operand(24); operand(32); break;
+    case 0x421: case 0x817: case 0x820: operand(16); operand(24); break;
+    case 0x81a: operand(16); operand(24); break;
+    case 0x919: operand(16); break;
+    case 0x20c: operand(24); operand(32); break;
+    case 0x208: operand(16); operand(24); operand(32); break;
+    case 0x823: operand(16); operand(24); operand(64); break;
+    case 0x245: operand(16); operand(32); break;
+    case 0x810: operand(16); operand(24); operand(64); break;
+    case 0x210: case 0x223: operand(16); operand(24); operand(32); operand(64); break;
     case 0x233: operand(16); operand(24); operand(32); break;
     case 0xa20: case 0x621: case 0x808: case 0x923: operand(16); operand(24); break;
     case 0x209: operand(16); operand(24); operand(32); break;
@@ -114,6 +123,10 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
         operand(opcode == 0x981 ? 16 : 32, count);
         operand(24, input.Bits(72, 1) ? 2 : 1); break;
     }
+    case 0x381: { // LDG with a 64-bit address
+        const u32 width = input.Bits(73, 3), count = width == 6 ? 4 : width == 5 ? 2 : 1;
+        operand(16, count); operand(24, 2); break;
+    }
     default:
         result.valid = false; return result;
     }
@@ -122,7 +135,12 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
     for (const auto [bit, count] : operands) {
         const u32 reg = input.Bits(bit, 8);
         if (reg == 255) continue;
-        if (reg + count > 255) { result.valid = false; return result; }
+        // Each quartet is borrowed on its own, so an operand above `reserved` must stay in one,
+        // and none may straddle `reserved`.
+        if (reg + count > 255 || (reg < reserved && reg + count > reserved) ||
+            (reg >= reserved && reg / 4 != (reg + count - 1) / 4)) {
+            result.valid = false; return result;
+        }
         for (u32 component = 0; component < count; ++component) {
             used[reg + component] = true;
             if (reg + component >= reserved) groups[(reg + component) / 4] = true;
@@ -3524,7 +3542,9 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                              (u64{insn.Bits(87, 3)} << 39) | (u64{insn.Bits(90, 1)} << 42));
                         emit(0x5c10000000000000ULL | predicate | 250 | (u64{250} << 8) | (u64{252} << 20));
                     }
-                    emit(base(0x5c10000000000000ULL) | (u64{250} << 8) | (u64{b} << 20));
+                    // 0x211 bit 63: -Rb, Maxwell IADD's negated second source (bit 48).
+                    emit(base(0x5c10000000000000ULL) | (u64{250} << 8) | (u64{b} << 20) |
+                         (u64{opcode == 0x211 ? insn.Bits(63, 1) : 0U} << 48));
                 }
                 break;
             }
@@ -3636,9 +3656,8 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 const bool carry_in = insn.Bits(74, 1) != 0;
                 const u32 carry_out = insn.Bits(81, 3);
                 const u32 a = insn.Bits(24, 8);
-                if ((carry_in && carry_out != 7) || (opcode == 0x210 && (insn.words[1] & ~0xffU)) ||
-                    (rewritten_uniform && carry_out != 7 && carry_out > 1) ||
-                    (rewritten_uniform && carry_in && insn.Bits(87, 3) > 1 && insn.Bits(87, 3) != 7))
+                // A uniform carry goes through P(6-n) and R239 bit 6-n, so any UPn works.
+                if ((carry_in && carry_out != 7) || (opcode == 0x210 && (insn.words[1] & ~0xffU)))
                     return fail(index, "native integer carry mode");
                 if (opcode == 0x810) {
                     emit(0x1c00000000000000ULL | predicate | 250 | (u64{a} << 8) | (u64{insn.words[1]} << 20));
