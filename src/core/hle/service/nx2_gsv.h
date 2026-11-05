@@ -2805,6 +2805,7 @@ private:
             }
             if (m_skipping) {
                 m_skipping = false;
+                m_skip_declined = true;
                 m_end_queued = false;
                 LOG_INFO(Service, "{} skipped movie still fed, playing it", GetServiceName());
             }
@@ -2845,6 +2846,7 @@ private:
             m_inputs.Clear();
             m_flush = true;
             m_skipping = false;
+            m_skip_declined = false;
             m_stream_ended = false;
             m_end_queued = false;
             m_ready->room.store(true, std::memory_order_relaxed);
@@ -3038,7 +3040,7 @@ private:
                 const char* value = std::getenv("EDEN_NX2_SKIP_MOVIES");
                 return value != nullptr && value[0] == '1';
             }();
-            if (skip_movies && !m_decoded.empty()) {
+            if (skip_movies && !m_skip_declined && !m_decoded.empty()) {
                 m_skipping = true;
                 m_skipped_inputs = 0;
                 m_end_queued = true;
@@ -3245,6 +3247,7 @@ private:
     bool m_end_queued{};
     bool m_skipping{};                 ///< EDEN_NX2_SKIP_MOVIES ended this movie early
     u32 m_skipped_inputs{};
+    bool m_skip_declined{};            ///< The client kept feeding a skipped movie: play it
     bool m_flush{};
     bool m_quit{};
     std::thread m_worker;

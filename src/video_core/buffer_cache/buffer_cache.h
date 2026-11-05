@@ -190,7 +190,13 @@ void BufferCache<P>::WriteMemory(DAddr device_addr, u64 size, bool keep_page_gpu
     // above, so they aren't overwritten).
     const DAddr page_begin = Common::AlignDown(device_addr, DEVICE_PAGESIZE);
     const DAddr page_end = Common::AlignUp(device_addr + size, DEVICE_PAGESIZE);
-    if (keep_page_gpu_data && gpu_modified_ranges.Intersects(page_begin, page_end - page_begin)) {
+    // EDEN_NX2_KEEP_PAGE_GPU_DATA=0: skip that download (each one waits for the GPU).
+    static const bool keep_pages = [] {
+        const char* value = std::getenv("EDEN_NX2_KEEP_PAGE_GPU_DATA");
+        return value == nullptr || value[0] != '0';
+    }();
+    if (keep_page_gpu_data && keep_pages &&
+        gpu_modified_ranges.Intersects(page_begin, page_end - page_begin)) {
         DownloadMemory(page_begin, page_end - page_begin);
     }
     memory_tracker.MarkRegionAsCpuModified(device_addr, size);
