@@ -7,6 +7,7 @@
 #pragma once
 
 #include <limits>
+#include <source_location>
 
 #include <boost/container/small_vector.hpp>
 
@@ -130,7 +131,7 @@ public:
     /// Waits for a submitted tick without flushing: safe on threads other than the GPU thread.
     void WaitSubmittedTick(u64 tick);
 
-    void Finish();
+    void Finish(std::source_location location = std::source_location::current());
 
     u64 GetDeviceLocalMemory() const;
 

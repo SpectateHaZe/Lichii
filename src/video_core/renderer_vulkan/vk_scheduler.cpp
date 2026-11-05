@@ -14,6 +14,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 #include <fmt/format.h>
@@ -45,6 +46,16 @@ std::atomic<u64> g_profile_finish_ns{};
 std::atomic<u64> g_profile_window_start{};
 std::mutex g_profile_end_mutex;
 std::map<std::string, u64> g_profile_ends;
+std::map<std::string, u64> g_profile_flush_sites;
+std::map<std::string, std::pair<u64, u64>> g_profile_finish_sites;
+
+std::string SiteName(const std::source_location& location) {
+    std::string_view name{location.file_name()};
+    if (const auto slash = name.find_last_of("/\\"); slash != std::string_view::npos) {
+        name.remove_prefix(slash + 1);
+    }
+    return fmt::format("{}:{}", name, location.line());
+}
 
 void CountRenderPassEnd(const char* file, u32 line) {
     if (!VideoCommon::Nx2Profile::Enabled()) {
@@ -78,18 +89,45 @@ void ReportSubmitCounts() {
              static_cast<double>(g_profile_finishes.exchange(0)) / seconds,
              static_cast<double>(g_profile_finish_ns.exchange(0)) / 1e6 / seconds);
     std::vector<std::pair<u64, std::string>> ends;
+    std::vector<std::pair<u64, std::string>> flushes;
+    std::vector<std::tuple<u64, u64, std::string>> finishes;
     {
         std::scoped_lock lock{g_profile_end_mutex};
         for (const auto& [site, count] : g_profile_ends) {
             ends.emplace_back(count, site);
         }
+        for (const auto& [site, count] : g_profile_flush_sites) {
+            flushes.emplace_back(count, site);
+        }
+        for (const auto& [site, value] : g_profile_finish_sites) {
+            finishes.emplace_back(value.second, value.first, site);
+        }
         g_profile_ends.clear();
+        g_profile_flush_sites.clear();
+        g_profile_finish_sites.clear();
     }
     std::sort(ends.rbegin(), ends.rend());
     for (size_t i = 0; i < ends.size() && i < 16; ++i) {
         LOG_INFO(Render_Vulkan, "Render pass ends {:.0f}/s at {}",
                  static_cast<double>(ends[i].first) / seconds, ends[i].second);
     }
+    std::sort(flushes.rbegin(), flushes.rend());
+    for (size_t i = 0; i < flushes.size() && i < 12; ++i) {
+        LOG_INFO(Render_Vulkan, "Submits {:.0f}/s from {}",
+                 static_cast<double>(flushes[i].first) / seconds, flushes[i].second);
+    }
+    std::sort(finishes.rbegin(), finishes.rend());
+    for (size_t i = 0; i < finishes.size() && i < 12; ++i) {
+        const auto& [ns, count, site] = finishes[i];
+        LOG_INFO(Render_Vulkan, "Finishes {:.0f}/s waiting {:.1f} ms/s from {}",
+                 static_cast<double>(count) / seconds, static_cast<double>(ns) / 1e6 / seconds,
+                 site);
+    }
+}
+
+void CountSite(std::map<std::string, u64>& sites, const std::source_location& location) {
+    std::scoped_lock lock{g_profile_end_mutex};
+    ++sites[SiteName(location)];
 }
 }
 
@@ -171,6 +209,9 @@ u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
     if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
         VideoCommon::GpuSplit::CheckOwner("Scheduler::Flush");
     }
+    if (VideoCommon::Nx2Profile::Enabled()) {
+        CountSite(g_profile_flush_sites, location);
+    }
     // When flushing, we only send data to the worker thread; no waiting is necessary.
     const u64 signal_value = SubmitExecution(signal_semaphore, wait_semaphore);
     AllocateNewContext();
@@ -251,9 +292,13 @@ void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
     last_flush = std::chrono::steady_clock::now();
     flush_pending = false;
     if (profile) {
+        const u64 elapsed = VideoCommon::Nx2Profile::Now() - start;
         g_profile_finishes.fetch_add(1, std::memory_order_relaxed);
-        g_profile_finish_ns.fetch_add(VideoCommon::Nx2Profile::Now() - start,
-                                      std::memory_order_relaxed);
+        g_profile_finish_ns.fetch_add(elapsed, std::memory_order_relaxed);
+        std::scoped_lock lock{g_profile_end_mutex};
+        auto& site = g_profile_finish_sites[SiteName(location)];
+        ++site.first;
+        site.second += elapsed;
     }
 }
 
