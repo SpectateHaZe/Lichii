@@ -26,6 +26,7 @@
 #include "video_core/nx2_profile.h"
 #include "video_core/nx2.h"
 #include "video_core/engines/fermi_2d.h"
+#include "video_core/texture_cache/texture_cache_base.h"
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/game_dlss_status.h"
@@ -1047,7 +1048,7 @@ bool KeplerCompute::TryFireEmblemUpscale(bool allow_history) {
     }
     const auto surface = [](const Texture::TICEntry& tic, Tegra::RenderTargetFormat format) {
         Fermi2D::Surface result{};
-        result.format = format;
+        result.format = blit_format(tic).value_or(RTFormat::B10G11R11_FLOAT);
         result.linear = Fermi2D::MemoryLayout::BlockLinear;
         result.block_width.Assign(tic.block_width);
         result.block_height.Assign(tic.block_height);
