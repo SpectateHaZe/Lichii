@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <fmt/ranges.h>
@@ -198,6 +199,15 @@ void Tas::UpdateThread() {
         LOG_DEBUG(Input, "tas_reset done");
     }
 
+    // EDEN_TAS_AUTOSTART=1: play the scripts from the first displayed frame, without the hotkey.
+    static bool autostart = [] {
+        const char* value = std::getenv("EDEN_TAS_AUTOSTART");
+        return value != nullptr && value[0] == '1';
+    }();
+    if (autostart) {
+        autostart = false;
+        is_running = true;
+    }
     if (!is_running) {
         ClearInput();
         return;
