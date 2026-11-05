@@ -36,3 +36,6 @@ EDEN_NX2_FENCE_BATCH=1
 #EDEN_NX2_SPLIT_SKIP=1
 #EDEN_NX2_AUTO_STUB=1
 #EDEN_NX2_KEEP_ASTC=1
+
+# End each movie after its first frame (skips intros and video cutscenes).
+#EDEN_NX2_SKIP_MOVIES=1

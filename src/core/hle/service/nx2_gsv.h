@@ -2796,6 +2796,11 @@ private:
         const auto input_size = input.data.size();
         {
             std::scoped_lock lk{m_mutex};
+            if (m_skipping) {
+                const u64 id = ++m_submitted;
+                TipcReplyWords(ctx, {static_cast<u32>(id), static_cast<u32>(id >> 32)});
+                return;
+            }
             m_inputs.Push(std::move(input));
             m_stream_ended = false;
             m_end_queued |= end;
@@ -2832,6 +2837,7 @@ private:
             }
             m_inputs.Clear();
             m_flush = true;
+            m_skipping = false;
             m_stream_ended = false;
             m_end_queued = false;
             m_ready->room.store(true, std::memory_order_relaxed);
@@ -3012,12 +3018,27 @@ private:
                          m_syncpoint, decoder->Name(), decoder->IsOpen(), input.pts, input.end,
                          pictures.size(), m_decoded_frames, m_flush);
             }
-            if (m_flush) {
+            if (m_flush || m_skipping) {
                 continue;
             }
             for (auto& picture : pictures) {
                 const u64 pts = picture.pts;
                 m_decoded.push_back({std::move(picture), pts, false});
+            }
+            // EDEN_NX2_SKIP_MOVIES=1: the first picture ends the movie; later input is dropped
+            // until the client stops or flushes the decoder.
+            static const bool skip_movies = [] {
+                const char* value = std::getenv("EDEN_NX2_SKIP_MOVIES");
+                return value != nullptr && value[0] == '1';
+            }();
+            if (skip_movies && !m_decoded.empty()) {
+                m_skipping = true;
+                m_end_queued = true;
+                m_inputs.Clear();
+                m_ready->room.store(false, std::memory_order_relaxed);
+                m_decoded.back().end = true;
+                LOG_INFO(Service, "{} movie skipped (EDEN_NX2_SKIP_MOVIES)", GetServiceName());
+                continue;
             }
             if (input.end) {
                 // The client stops at the frame marked end of stream; give it one even when the
@@ -3214,6 +3235,7 @@ private:
     Output m_last_output{};
     bool m_stream_ended{};             ///< End-of-stream frame handed out, nothing submitted since
     bool m_end_queued{};
+    bool m_skipping{};                 ///< EDEN_NX2_SKIP_MOVIES ended this movie early
     bool m_flush{};
     bool m_quit{};
     std::thread m_worker;
